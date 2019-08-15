@@ -2412,7 +2412,9 @@ mx = 0.05 * m  # Ranges between 0.035 - 0.05
 my = 0.2 * m  # Ranges between 0.2 - 0.375
 
 k = 0.25 * L            #Center of Rotation for the ship
+kj = 0.2 * L
 Inertia = m * k**2
+J = m * kj**2
 
 Fn = 0.5 * rho * (6.13*l/(l+2.25)) * A * Vr**2.
 delta = 35.0 * np.pi/180
@@ -2437,7 +2439,7 @@ def udot(t,u,v,r):
     cm = 0.5                               #Variable ranging 0.5 - 0.75
 
     udot = ( (m + cm * my) * v * r         #Added mass term
-             + Xu                          #Resistance dependant on velocity. (Force units N m/s2)
+             - Xu                          #Resistance dependant on velocity. (Force units N m/s2)
              + Xp                          #Force due to propeller thrust
              - Fn * np.sin(delta) ) / (m + mx)    #Force due to rudder action
     return udot
@@ -2445,15 +2447,16 @@ def udot(t,u,v,r):
 def YHO(t,v,r):
     #Yvdot and Yrdot are taken from Clarke's expressions
     Ck = -1.0 * pi * (T / L) ** 2.0
+    kk = 2. * T / L
     YvdotND = Ck * (1 + (0.16 * Cb * B/T) - 5.1 * (B/L)**2.0)
-    YvND = Ck * (1 + 0.4 * Cb * B/T)
+    YvND = 0.5 * np.pi * kk - 1.4 * CB * B / L #Ck * (1 + 0.4 * Cb * B/T)
     YrdotND = Ck * (0.67*B/L - 0.0033 * (B/T)**2.)
-    YrND = Ck * (-0.5 + (2.2 * B/L) - 0.08 * (B/T))
+    YrND = 0.15 * np.pi * kk #Ck * (-0.5 + (2.2 * B/L) - 0.08 * (B/T))
     Yvvi = 6.4241 * ((1 - Cb) * (1 / (B / T))) - 0.0743
     Yvri = -1.8561 * ((1 - Cb) * (1 / (B / T))) + 0.4503
     Yrri = -(0.4705 * ((1 - Cb) * (1 / (B / T))) + 0.0005)
     vi = v/U
-    ri = r/(L*U)
+    ri = r*L/U
     Yho = 0.5 * rho * L * T * U * U * (YvND * vi +
                                        YrND * ri +
                                        Yvvi * vi * np.abs(vi) +
@@ -2472,7 +2475,7 @@ def vdot(t,u,v,r):
     '''
     Yho = YHO(t,v,r)
     Ah = 0.3
-    vdot = -( (m + mx) * u * r \
+    vdot = ( -(m + mx) * u * r \
            + Yho - \
            (1 + Ah) * Fn * np.cos(delta) ) / (m + my)
     return vdot
@@ -2487,17 +2490,18 @@ def rdot(t,u,v,r):
     :return: yaw acceleration
     '''
     Ck = -1.0 * pi * (T / L) ** 2.0
+    kk = 2. * T / L
     NvdotND = Ck * (1.1 * (B/L) - 0.041 * B/T)
-    NvND = Ck * (0.5 + 2.4 * T/L)
+    NvND = 1.0 * kk #Ck * (0.5 + 2.4 * T/L)
     NrdotND = Ck * ( (1./12.) + (0.017 * Cb * B/T) - (0.33 * B/L))
-    NrND = Ck * (0.25 - 0.56 * B/L + 0.039 * B/T)
+    NrND = -0.74 * kk - kk**2. #Ck * (0.25 - 0.56 * B/L + 0.039 * B/T)
     Nvvri = -(21369.0 *(Cb * B / L)**4 - 12886.0 * (Cb * B / L)**3 + 2880.0 * (Cb * B / L)**2 - 279.9 * (Cb * B / L) +
               10.018)
     Nvrri = -0.4457 * (Cb * (1. / (B / T))) + 0.0627
     Nrri = -(5.5648 * (Cb * B / L)**2 - 1.7362 * (Cb * B / L) + 0.1487)
 
     vi = v/U
-    ri = r/(L*U)
+    ri = r*L/U
 
     xR = 0.5 * L
     Ah = 0.3
@@ -2509,11 +2513,12 @@ def rdot(t,u,v,r):
             NrND * ri +
             Nvvri * vi * vi * ri +
             Nvrri * vi * ri * ri +
-            Nrri * ri * np.abs(ri))
+            Nrri * ri * np.abs(ri) )
     rdot = (Nho + \
-           Yho * xR - \
-           (1+Ah) * xR * Fn * np.cos(delta) ) / Inertia 
+            Yho * xR - \
+            (1+Ah) * xR * Fn * np.cos(delta) ) / (Inertia + J) 
     return rdot
+
 
 fo = open("Inoue.txt","w")
 header = "Write outputs from the Runge-Kutta solution for each time step" + "\n" \
@@ -2522,22 +2527,53 @@ header = "Write outputs from the Runge-Kutta solution for each time step" + "\n"
 fo.write(header)
 
 lv = RK4(udot,vdot,rdot)
-t, [u,v,r] = lv.solve([U,0,0], 0.01,100) # lv.solve(initialConditions, timeStep, FinalTime)
+dt = 0.1
+t, [u,v,r] = lv.solve([U,0,0], dt,60*7) # lv.solve(initialConditions, timeStep, FinalTime)
+
+x = 0.0
+y = 0.0
+psi = 0.0
+X = list()
+Y = list()
+P = list()
+
+for i in range(len(t)):
+    time = t[i]
+    uo = u[i]
+    ro = r[i]
+    vo = v[i]
+    string = ('{}\t{}\t{}\t{}\n').format(time,uo,vo,ro)
+    psi -= dt * ro
+    x += dt * (uo * np.cos(psi) - vo * np.sin(psi) )
+    y += dt * (uo * np.sin(psi) + vo * np.cos(psi) )
+    X.append(x/L)
+    Y.append(y/L)
+    P.append(psi*180/pi)
+    fo.write(string)
 
 print(t[-1],u[-1],v[-1],r[-1]) # Final values
 
 fo.close()
 
-print(t[-1],v[-1],r[-1]) # Final values
-
+plt.figure(1)
+plt.subplot(121)
+plotu = plt.plot(t,u,'b',label="u")
 plotr = plt.plot(t, r,'g',label="r")
 plotv = plt.plot(t,v,'r',label="v")
+#plotpsi = plt.plot(t,P,'y',label="psi")
 plt.xticks()
 plt.yticks()
-plt.ylabel("v(m/s), r(rad/s)")
+plt.ylabel("u(m/s),v(m/s), r(rad/s)")
 plt.xlabel("time (s)")
 plt.grid()
 plt.legend(loc="best")
+plt.subplot(122)
+plotT = plt.plot(Y,X,'k--',lw=2)
+plt.xticks()
+plt.yticks()
+plt.ylabel("x/L")
+plt.xlabel("y/L")
+plt.grid()
 plt.show()
 
 
